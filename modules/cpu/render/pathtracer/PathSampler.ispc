@@ -113,6 +113,8 @@ SYCL_EXTERNAL void samplePath(const PathContext &pathContext,
     ScreenSample &sample,
     const uniform FeatureFlagsHandler &ffh)
 {
+  const uniform FeatureFlags ff = getFeatureFlags(ffh);
+
   PathVertex lastVertex;
   lastVertex.type = CAMERA;
 #ifdef OSPRAY_ENABLE_VOLUMES
@@ -125,10 +127,14 @@ SYCL_EXTERNAL void samplePath(const PathContext &pathContext,
   lastVertex.dg.Ns = ray.dir;
   lastVertex.dg.Ng = ray.dir;
   lastVertex.numLightSamples = 0;
+ #ifdef OSPRAY_ENABLE_VOLUMES
+  if (ff.other & FFO_VOLUME_IN_SCENE) {
+    lastVertex.dg.Ng = lastVertex.dg.Ns = make_vec3f(0.f);
+  }
+  #endif
 
   uniform ShadingContext ctx;
   ShadingContext_Constructor(&ctx);
-  const uniform FeatureFlags ff = getFeatureFlags(ffh);
 
   if (pathContext.context->shadowCatcher) {
     const Hit hit = intersectPlane(
@@ -167,6 +173,7 @@ SYCL_EXTERNAL void samplePath(const PathContext &pathContext,
 #ifdef OSPRAY_ENABLE_VOLUMES
     if (ff.other & FFO_VOLUME_IN_SCENE) {
       float extinctionCoefficient;
+      vec3f normal;
       float freePath = volumeSampleFreePath(pathContext.world,
           ray,
           rayIntervals,
@@ -174,10 +181,12 @@ SYCL_EXTERNAL void samplePath(const PathContext &pathContext,
           &pathVertex.volume,
           extinctionCoefficient,
           pathVertex.albedo,
+          normal,
           ffh);
       if (freePath < inf) {
         pathVertex.type = VOLUME;
         pathState.throughput = pathState.throughput * pathVertex.albedo;
+        pathVertex.dg.Ng = pathVertex.dg.Ns = normal;
       }
     }
 #endif
@@ -354,10 +363,12 @@ SYCL_EXTERNAL void samplePath(const PathContext &pathContext,
       > pathContext.context->super.minContribution);
 
   sample.rgb = pathState.contribution;
+  sample.normal = lastVertex.dg.Ng;
   if (isnan(pathState.contribution.x) || isnan(pathState.contribution.y)
       || isnan(pathState.contribution.z)) {
     sample.rgb = make_vec3f(0.f);
     sample.alpha = 1.0f;
+    sample.normal = make_vec3f(0.f);
   }
 }
 

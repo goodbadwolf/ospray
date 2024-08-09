@@ -17,8 +17,9 @@ float delta_tracking(const VolumetricModel *uniform vModel,
     const vec3f &w,
     const float &time,
     float &mu_t, // sampled extinction coefficint
-    vec3f &albedo,
-    const uniform FeatureFlagsHandler &ffh) // sampled albedo (color)
+    vec3f &albedo, // sampled albedo (color)
+    vec3f &gradient, // sampled gradient
+    const uniform FeatureFlagsHandler &ffh)
 {
   const uniform FeatureFlags ff = getFeatureFlags(ffh);
 
@@ -90,8 +91,10 @@ float delta_tracking(const VolumetricModel *uniform vModel,
       const vec4f color =
           TransferFunction_dispatch_get(vModel->transferFunction, sample);
       mu_t = vModel->densityScale * color.w;
+      vec3f sampledGradient = Volume_getGradient(vModel->volume, p, ffh);
       if (xi < mu_t / mu_max) {
         albedo = make_vec3f(color);
+        gradient = sampledGradient;
         return t;
       }
     }
@@ -106,6 +109,7 @@ SYCL_EXTERNAL float volumeSampleFreePath(const World *uniform world,
     const VolumetricModel *varying *uniform sampledInstance,
     float &sampledExtinctionCoefficient,
     vec3f &sampledAlbedo,
+    vec3f &sampledNormal,
     const uniform FeatureFlagsHandler &ffh)
 {
 #ifdef OSPRAY_TARGET_SYCL
@@ -143,9 +147,11 @@ SYCL_EXTERNAL float volumeSampleFreePath(const World *uniform world,
     if (isEmpty(vInterval))
       continue;
 
-    AffineSpace3f xfm;
-    foreach_unique (inst in volumeIntervals.intervals[i].instance)
+    AffineSpace3f xfm, rcpXfm;
+    foreach_unique (inst in volumeIntervals.intervals[i].instance) {
       xfm = Instance_getTransform(inst, volumeRay.time);
+      rcpXfm = rcp(xfm);
+    }
 
     Ray transformedVolumeRay = volumeRay;
     transformRay(transformedVolumeRay, rcp(xfm));
@@ -168,6 +174,7 @@ SYCL_EXTERNAL float volumeSampleFreePath(const World *uniform world,
 
         float extinctionCoefficient;
         vec3f albedo;
+        vec3f gradient;
         const float dist = delta_tracking(inst,
             rInterval,
             randomSampler,
@@ -176,13 +183,26 @@ SYCL_EXTERNAL float volumeSampleFreePath(const World *uniform world,
             transformedVolumeRay.time,
             extinctionCoefficient,
             albedo,
+            gradient,
             ffh);
+        vec3f normal = gradient;
+        if(dot(normal, normal) > 1e-6f)
+        {
+          // assume that opacity directly correlates to volume scalar field, i.e.
+          // that "outside" has lower values; because the gradient point towards
+          // increasing values we need to flip it
+          normal = neg(normal);
+          // transform to world coords
+          normal = normalize(xfmVector(transposed(rcpXfm.l), normal));
+        } 
+ 
         if (dist < inf) {
           if (dist < min_dist) {
             min_dist = dist;
             *sampledInstance = inst;
             sampledExtinctionCoefficient = extinctionCoefficient;
             sampledAlbedo = albedo;
+            sampledNormal = normal;
             ray.t = dist;
             ray.primID = 0;
             ray.geomID = volumeIntervals.intervals[i].geomID;
@@ -259,6 +279,7 @@ SYCL_EXTERNAL float volumeTransmittance(const World *uniform world,
 
         float extinctionCoefficient;
         vec3f albedo;
+        vec3f _gradient;
         const float dist = delta_tracking(inst,
             rInterval,
             randomSampler,
@@ -267,6 +288,7 @@ SYCL_EXTERNAL float volumeTransmittance(const World *uniform world,
             transformedVolumeRay.time,
             extinctionCoefficient,
             albedo,
+            _gradient,
             ffh);
         transmittance = transmittance * ((dist < rInterval.upper) ? 0.f : 1.f);
       }

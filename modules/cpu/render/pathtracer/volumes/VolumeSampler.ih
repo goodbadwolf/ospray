@@ -24,6 +24,7 @@ SYCL_EXTERNAL float volumeSampleFreePath(const World *uniform world,
     const VolumetricModel *varying *uniform sampledInstance,
     float &sampledExtinctionCoefficient,
     vec3f &sampledAlbedo,
+    vec3f &sampleGradient,
     const uniform FeatureFlagsHandler &ffh);
 
 SYCL_EXTERNAL float volumeTransmittance(const World *uniform world,

@@ -18,8 +18,11 @@ inline void VolumetricModel_postIntersect(const VolumetricModel *uniform self,
     const varying Ray &ray,
     uniform int64)
 {
+  // We do not zero out the normal as that is saved in the frame buffer
+  /*
   dg.Ng = make_vec3f(0.f);
   dg.Ns = make_vec3f(0.f);
+  */
   dg.dPds = make_vec3f(0.f);
   dg.dPdt = make_vec3f(0.f);
   dg.st = make_vec2f(0);
